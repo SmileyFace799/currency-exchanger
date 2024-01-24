@@ -1,11 +1,11 @@
 package currencyexchanger;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.BufferedReader;
-import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
-import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -14,16 +14,30 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public class HtmlRequester {
-    private static final Logger logger = Logger.getLogger(HtmlRequester.class.getName());
+    private static final Logger LOGGER = Logger.getLogger(HtmlRequester.class.getName());
 
-    private final URL url;
+    private final String endpointUrl;
     private final Map<String, String> headers;
 
-    public HtmlRequester(String url) throws MalformedURLException {
-        this(url, null);
+    /**
+     * Creates a requester object that can send HTML requests to the provided {@code url} endpoint.
+     *
+     * @param endpointUrl The endpoint URL to send requests to
+     * @see #HtmlRequester(String, Map)
+     */
+    public HtmlRequester(String endpointUrl) {
+        this(endpointUrl, null);
     }
-    public HtmlRequester(String url, Map<String, String> headers) throws MalformedURLException {
-        this.url = new URL(url);
+
+    /**
+     * Creates a requester object that can send HTML requests to the provided {@code url} endpoint with the specified headers.
+     *
+     * @param endpointUrl The endpoint URL to send requests to
+     * @param headers     Any headers that should be included in requests sent by this requester
+     * @see #HtmlRequester(String)
+     */
+    public HtmlRequester(String endpointUrl, Map<String, String> headers) {
+        this.endpointUrl = endpointUrl + "?";
         this.headers = headers;
     }
 
@@ -34,28 +48,21 @@ public class HtmlRequester {
         )).toList());
     }
 
-    private HttpURLConnection getConnection() throws IOException {
-        HttpURLConnection con = (HttpURLConnection) url.openConnection();
-        con.setConnectTimeout(5000);
-        con.setReadTimeout(5000);
-        con.setDoOutput(true);
-        if (headers != null) {
-            headers.forEach(con::setRequestProperty);
-        }
-        return con;
-    }
-
-    public String sendRequest(RequestType type) throws IOException {
+    public JsonNode sendRequest(RequestType type) throws IOException {
         return sendRequest(type, null);
     }
 
-    public String sendRequest(RequestType type, Map<String, String> parameters) throws IOException {
-        HttpURLConnection con = getConnection();
+    public JsonNode sendRequest(RequestType type, Map<String, String> parameters) throws IOException {
+        URL url = new URL(parameters == null || parameters.isEmpty()
+                ? endpointUrl
+                : endpointUrl + stringifyParameters(parameters)
+        );
+        HttpURLConnection con = (HttpURLConnection) url.openConnection();
         con.setRequestMethod(type.string());
-        if (parameters != null) {
-            try (DataOutputStream dos = new DataOutputStream(con.getOutputStream())) {
-                dos.writeBytes(stringifyParameters(parameters));
-            }
+        con.setConnectTimeout(5000);
+        con.setReadTimeout(5000);
+        if (headers != null) {
+            headers.forEach(con::setRequestProperty);
         }
 
         //Request is sent here
@@ -65,10 +72,10 @@ public class HtmlRequester {
         String logMessage = String.format("Request returned with status %s %s", statusCode, con.getResponseMessage());
         InputStreamReader responseReader;
         if (statusCode <= 299) {
-            logger.log(Level.INFO, logMessage);
+            LOGGER.log(Level.INFO, logMessage);
             responseReader = new InputStreamReader(con.getInputStream());
         } else {
-            logger.log(Level.WARNING, logMessage);
+            LOGGER.log(Level.WARNING, logMessage);
             responseReader = new InputStreamReader(con.getErrorStream());
         }
 
@@ -79,7 +86,8 @@ public class HtmlRequester {
                 response.append(inputLine);
             }
         }
-        return response.toString();
+        con.disconnect();
+        return new ObjectMapper().readTree(response.toString());
     }
 
     public enum RequestType {
